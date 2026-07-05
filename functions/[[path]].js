@@ -2,7 +2,6 @@ export async function onRequestGet({ request, env }) {
   try {
     const url = new URL(request.url);
 
-    // ---- Debug route: /__debug ----
     if (url.pathname === "/__debug") {
       const hasKV = typeof env.CLICKS !== "undefined";
       let kvTest = "not attempted";
@@ -22,36 +21,59 @@ export async function onRequestGet({ request, env }) {
 
     const plan = url.searchParams.get("plan");
     const ref = url.searchParams.get("ref") || "";
+    // "clickid" here should match whatever macro name the affiliate's
+    // tracker (Binom/Keitaro) confirmed they use — swap the param name if theirs differs.
+    const trackerClickId = url.searchParams.get("clickid") || null;
     const fbclid = url.searchParams.get("fbclid") || null;
     const ttclid = url.searchParams.get("ttclid") || null;
 
     if (!plan) {
-      return new Response("Missing plan parameter. Example: /?plan=plan_xxxx&ref=affiliatecode", {
-        status: 400,
-      });
+      return new Response(
+        "Missing plan parameter. Example: /?plan=plan_xxxx&ref=affiliatecode&clickid=abc",
+        { status: 400 }
+      );
     }
+
+    // Optional local backup copy — not required for the tracker's own
+    // reporting (their click_id already round-trips via Whop metadata),
+    // but useful for your own records/debugging.
     if (env.CLICKS) {
       try {
-        const clickId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
         await env.CLICKS.put(
-          clickId,
-          JSON.stringify({ plan, ref, fbclid, ttclid, created_at: Date.now() }),
+          trackerClickId || crypto.randomUUID(),
+          JSON.stringify({ plan, ref, trackerClickId, fbclid, ttclid, created_at: Date.now() }),
           { expirationTtl: 60 * 60 * 24 * 30 }
         );
       } catch (e) {
-        // Don't block the redirect if KV write fails — logging only.
+        // Don't block checkout if this fails — logging only.
       }
     }
 
-    let whopUrl = `https://whop.com/checkout/${encodeURIComponent(plan)}/`;
-    if (ref) {
-      whopUrl += `?a=${encodeURIComponent(ref)}`;
+    // Create the checkout server-side so we can attach metadata.
+    const response = await fetch("https://api.whop.com/api/v5/checkout_configurations", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.WHOP_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        plan: { id: plan },
+        affiliate_code: ref || null,
+        metadata: { ref: ref || null, click_id: trackerClickId },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return new Response(`Whop API error: ${errorText}`, { status: 500 });
     }
+
+    const data = await response.json();
 
     return new Response(null, {
       status: 302,
       headers: {
-        Location: whopUrl,
+        Location: data.purchase_url,
         "Referrer-Policy": "no-referrer",
         "Cache-Control": "no-store",
       },

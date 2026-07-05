@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="referrer" content="no-referrer">
+  <title>Secure Checkout...</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-family: Arial, sans-serif;
+      background: #fff;
+    }
+    .box {
+      text-align: center;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #eee;
+      border-top: 4px solid #10b981;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 15px;
+    }
+    @keyframes spin {
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="spinner"></div>
+    <div>Establishing secure connection...</div>
+  </div>
+
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+
+      const plan = params.get("plan");
+      const ref = params.get("ref") || "";
+      const fbclid = params.get("fbclid") || "";
+      const ttclid = params.get("ttclid") || "";
+
+      if (!plan) {
+        document.body.innerHTML = "Missing plan parameter";
+        return;
+      }
+
+      // send everything to backend (THIS is where tracking happens)
+      const qs = new URLSearchParams({
+        plan,
+        ref,
+        fbclid,
+        ttclid
+      });
+
+      // hand off to Cloudflare Function
+      window.location.replace("/go?" + qs.toString());
+    })();
+  </script>
+</body>
+</html>

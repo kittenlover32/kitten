@@ -1,7 +1,8 @@
-export async function onRequestGet({ request, env }) {
+export async function onRequestGet({ request, env, waitUntil }) {
   try {
     const url = new URL(request.url);
 
+    // ---- Debug route: /__debug ----
     if (url.pathname === "/__debug") {
       const hasKV = typeof env.CLICKS !== "undefined";
       let kvTest = "not attempted";
@@ -37,16 +38,15 @@ export async function onRequestGet({ request, env }) {
     // Optional local backup copy — not required for the tracker's own
     // reporting (their click_id already round-trips via Whop metadata),
     // but useful for your own records/debugging.
+    // Runs in the background — does NOT block the redirect.
     if (env.CLICKS) {
-      try {
-        await env.CLICKS.put(
+      waitUntil(
+        env.CLICKS.put(
           trackerClickId || crypto.randomUUID(),
           JSON.stringify({ plan, ref, trackerClickId, fbclid, ttclid, created_at: Date.now() }),
           { expirationTtl: 60 * 60 * 24 * 30 }
-        );
-      } catch (e) {
-        // Don't block checkout if this fails — logging only.
-      }
+        ).catch(() => {})
+      );
     }
 
     // Create the checkout server-side so we can attach metadata.

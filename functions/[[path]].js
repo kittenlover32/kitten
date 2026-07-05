@@ -2,12 +2,7 @@ export async function onRequestGet({ request, env }) {
   try {
     const url = new URL(request.url);
 
-    const plan = url.searchParams.get("plan");
-    const ref = url.searchParams.get("ref") || "";
-    const fbclid = url.searchParams.get("fbclid") || null;
-    const ttclid = url.searchParams.get("ttclid") || null;
-
-    // Debug page — visit yoursite.pages.dev/__debug to check things
+    // ---- Debug route: /__debug ----
     if (url.pathname === "/__debug") {
       const hasKV = typeof env.CLICKS !== "undefined";
       let kvTest = "not attempted";
@@ -20,37 +15,38 @@ export async function onRequestGet({ request, env }) {
           kvTest = "KV ERROR: " + e.message;
         }
       }
-      return new Response(
-        JSON.stringify({ hasKV, kvTest, plan, ref, fbclid, ttclid }, null, 2),
-        { headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    if (!plan) {
-      return new Response("Missing plan parameter. Try /?plan=YOUR_PLAN_ID&ref=affiliatecode", {
-        status: 400,
+      return new Response(JSON.stringify({ hasKV, kvTest }, null, 2), {
+        headers: { "Content-Type": "application/json" },
       });
     }
 
-    if (!env.CLICKS) {
-      return new Response(
-        "KV binding 'CLICKS' is not available in this environment. Go to Pages > Settings > Functions > KV namespace bindings and add it for Production AND Preview.",
-        { status: 500 }
-      );
+    const plan = url.searchParams.get("plan");
+    const ref = url.searchParams.get("ref") || "";
+    const fbclid = url.searchParams.get("fbclid") || null;
+    const ttclid = url.searchParams.get("ttclid") || null;
+
+    if (!plan) {
+      return new Response("Missing plan parameter. Example: /?plan=plan_xxxx&ref=affiliatecode", {
+        status: 400,
+      });
+    }
+    if (env.CLICKS) {
+      try {
+        const clickId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+        await env.CLICKS.put(
+          clickId,
+          JSON.stringify({ plan, ref, fbclid, ttclid, created_at: Date.now() }),
+          { expirationTtl: 60 * 60 * 24 * 30 }
+        );
+      } catch (e) {
+        // Don't block the redirect if KV write fails — logging only.
+      }
     }
 
-    const clickId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-
-    await env.CLICKS.put(
-      clickId,
-      JSON.stringify({ ref, fbclid, ttclid, plan, created_at: Date.now() }),
-      { expirationTtl: 60 * 60 * 24 * 30 }
-    );
-
-    const whopUrl =
-      `https://whop.com/checkout/${encodeURIComponent(plan)}/` +
-      `?a=${encodeURIComponent(ref)}` +
-      `&click_id=${clickId}`;
+    let whopUrl = `https://whop.com/checkout/${encodeURIComponent(plan)}/`;
+    if (ref) {
+      whopUrl += `?a=${encodeURIComponent(ref)}`;
+    }
 
     return new Response(null, {
       status: 302,

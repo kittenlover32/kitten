@@ -2,7 +2,6 @@ export async function onRequestGet({ request, env, waitUntil }) {
   try {
     const url = new URL(request.url);
 
-    // ---- Debug route: /__debug ----
     if (url.pathname === "/__debug") {
       const hasKV = typeof env.CLICKS !== "undefined";
       let kvTest = "not attempted";
@@ -22,8 +21,6 @@ export async function onRequestGet({ request, env, waitUntil }) {
 
     const plan = url.searchParams.get("plan");
     const ref = url.searchParams.get("ref") || "";
-    // "clickid" here should match whatever macro name the affiliate's
-    // tracker (Binom/Keitaro) confirmed they use — swap the param name if theirs differs.
     const trackerClickId = url.searchParams.get("clickid") || null;
     const fbclid = url.searchParams.get("fbclid") || null;
     const ttclid = url.searchParams.get("ttclid") || null;
@@ -35,10 +32,6 @@ export async function onRequestGet({ request, env, waitUntil }) {
       );
     }
 
-    // Optional local backup copy — not required for the tracker's own
-    // reporting (their click_id already round-trips via Whop metadata),
-    // but useful for your own records/debugging.
-    // Runs in the background — does NOT block the redirect.
     if (env.CLICKS) {
       waitUntil(
         env.CLICKS.put(
@@ -49,14 +42,14 @@ export async function onRequestGet({ request, env, waitUntil }) {
       );
     }
 
-    // Create the checkout server-side so we can attach metadata.
-    const response = await fetch("https://api.whop.com/api/v5/checkout_configurations", {
+    const response = await fetch("https://api.whop.com/api/v1/checkout_configurations", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${env.WHOP_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        company_id: env.WHOP_COMPANY_ID,
         plan: { id: plan },
         affiliate_code: ref || null,
         metadata: { ref: ref || null, click_id: trackerClickId },
@@ -81,6 +74,12 @@ export async function onRequestGet({ request, env, waitUntil }) {
         "Cache-Control": "no-store",
       },
     });
+  } catch (err) {
+    return new Response("FUNCTION ERROR: " + err.message + "\n" + (err.stack || ""), {
+      status: 500,
+    });
+  }
+}
   } catch (err) {
     return new Response("FUNCTION ERROR: " + err.message + "\n" + (err.stack || ""), {
       status: 500,

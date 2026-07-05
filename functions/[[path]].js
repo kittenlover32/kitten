@@ -65,7 +65,10 @@ export async function onRequestGet({ request, env, waitUntil }) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      return new Response(`Whop API error: ${errorText}`, { status: 500 });
+      return new Response(
+        `Whop API error. Status: ${response.status} ${response.statusText}\nBody: ${errorText || "(empty)"}`,
+        { status: 500 }
+      );
     }
 
     const data = await response.json();

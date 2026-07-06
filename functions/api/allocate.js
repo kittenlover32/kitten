@@ -24,7 +24,7 @@ export async function onRequestGet({ request, env }) {
       return new Response("Missing KV binding: CLICKS", { status: 500, headers: CORS_HEADERS });
     }
 
-    const MAX_ORDERS_PER_ACCOUNT_PER_DAY = 15;
+    const MAX_ORDERS_PER_ACCOUNT_PER_DAY = 100000;
     const ACCOUNT_COUNT = 8;
     const now = new Date();
     const dayKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;

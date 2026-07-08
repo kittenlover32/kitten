@@ -1,6 +1,14 @@
 const AFFILIATE_POSTBACK_TEMPLATE =
   "https://www.hrk4r3do.com/?nid=3455&transaction_id={clickid}&amount={payoutamount}";
 
+// User agents that indicate a link-preview crawler / bot, not a real visitor.
+// These should NOT trigger a new Whop checkout session.
+const BOT_UA_REGEX =
+  /bot|crawl|spider|preview|facebookexternalhit|Slackbot|Discordbot|WhatsApp|TelegramBot|LinkedInBot|Twitterbot|SkypeUriPreview|Google-InspectionTool|Pinterest|Applebot|Bingbot|redditbot/i;
+
+const SESSION_TTL_SECONDS = 60 * 30; // reuse a checkout session for 30 min per click_id
+const CLICK_RECORD_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+
 export async function onRequestGet({ request, env }) {
   try {
     const url = new URL(request.url);
@@ -39,13 +47,39 @@ export async function onRequestGet({ request, env }) {
       return new Response("Missing WHOP_API_KEY environment variable.", { status: 500 });
     }
 
+    const ua = request.headers.get("User-Agent") || "";
+    if (BOT_UA_REGEX.test(ua)) {
+      return new Response(
+        "OK (bot/crawler detected, not creating checkout session)",
+        { status: 200 }
+      );
+    }
+
+    if (env.CLICKS && clickId) {
+      try {
+        const cachedUrl = await env.CLICKS.get("session:" + clickId);
+        if (cachedUrl) {
+          return new Response(null, {
+            status: 302,
+            headers: {
+              Location: cachedUrl,
+              "Referrer-Policy": "no-referrer",
+              "Cache-Control": "no-store",
+            },
+          });
+        }
+      } catch (e) {
+        // non-fatal, fall through and create a new session
+      }
+    }
+
     // Store the raw click info too, as a backup/local record.
     if (env.CLICKS && clickId) {
       try {
         await env.CLICKS.put(
           clickId,
           JSON.stringify({ plan, ref, created_at: Date.now() }),
-          { expirationTtl: 60 * 60 * 24 * 30 }
+          { expirationTtl: CLICK_RECORD_TTL_SECONDS }
         );
       } catch (e) {
         // non-fatal
@@ -68,6 +102,17 @@ export async function onRequestGet({ request, env }) {
     const whopData = await whopResponse.json().catch(() => null);
 
     if (!whopResponse.ok || !whopData) {
+      // If Whop rate-limits us (429), tell the browser to retry shortly
+      // instead of showing a raw error to a real visitor.
+      if (whopResponse.status === 429) {
+        return new Response(
+          "We're experiencing high traffic. Please refresh in a few seconds.",
+          {
+            status: 503,
+            headers: { "Retry-After": "5" },
+          }
+        );
+      }
       return new Response(
         "WHOP API ERROR (status " + whopResponse.status + "):\n" + JSON.stringify(whopData, null, 2),
         { status: 502 }
@@ -80,6 +125,18 @@ export async function onRequestGet({ request, env }) {
         "Whop response missing purchase_url:\n" + JSON.stringify(whopData, null, 2),
         { status: 502 }
       );
+    }
+
+    // Cache this session so repeated hits on the same click_id don't create
+    // duplicate Whop checkout sessions.
+    if (env.CLICKS && clickId) {
+      try {
+        await env.CLICKS.put("session:" + clickId, purchaseUrl, {
+          expirationTtl: SESSION_TTL_SECONDS,
+        });
+      } catch (e) {
+        // non-fatal
+      }
     }
 
     return new Response(null, {
